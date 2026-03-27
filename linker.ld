@@ -37,4 +37,10 @@ SECTIONS{
 
     . = ALIGN(0x1000);
     PROVIDE(_kernel_end = .);
+
+    .trampoline : {
+        PROVIDE(trampoline_start = .);
+        *(.trampoline .trampoline.*)
+        PROVIDE(trampoline_end = .);
+    }
 }

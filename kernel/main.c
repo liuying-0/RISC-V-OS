@@ -10,6 +10,10 @@
 #include "./proc/scheduler.h"
 #include "./trap/trap.h"
 
+// 用户程序 ELF 数据
+extern char _binary_user_hello_start[];
+extern char _binary_user_hello_end[];
+
 static void delay(void) {
     for (volatile int i = 0; i < 500000000; i++);
 }
@@ -36,25 +40,38 @@ void kernel_main(void){
 
     extern void s_trap_entry(void);
     csrw(stvec, (unsigned long)s_trap_entry);
+    csrw(sscratch, 0);  // 内核态 sscratch = 0，切换页表前设为 trapframe 地址
 
     uart_init();
+    printf("UART initialized\n");
     plic_init();
+    printf("PLIC initialized\n");
     plic_init_hart();
+    printf("PLIC Hart initialized\n");
 
     csrw(sie, SIE_SSIE | SIE_STIE | SIE_SEIE);
     csrs(sstatus, SSTATUS_SIE);
+    printf("S-mode interrupts enabled\n");
 
     pmm_init();
+    printf("PMM initialized\n");
     vmm_init();
+    printf("VMM initialized\n");
 
     proc_init();
+    printf("Proc initialized\n");
     timer_init();
+    printf("Timer initialized\n");
 
     printf("Hello from S-mode kernel!\n");
 
     proc_create("thread_a", thread_a);
     proc_create("thread_b", thread_b);
     printf("Starting scheduler...\n");
+
+    // 创建用户进程
+    unsigned long elf_size = (unsigned long)(_binary_user_hello_end - _binary_user_hello_start);
+    user_proc_create("hello", (const unsigned char *)_binary_user_hello_start, elf_size);
 
     scheduler();
 

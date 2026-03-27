@@ -35,7 +35,8 @@ SRCS_C = bootloader/main.c \
 		kernel/mm/page_table.c \
 		kernel/mm/vmm.c \
 		kernel/proc/proc.c \
-		kernel/proc/scheduler.c
+		kernel/proc/scheduler.c \
+		kernel/proc/elf.c
 
 
 OBJS_ASM = $(addprefix $(OUTPUT)/, $(patsubst %.S, %.o, $(SRCS_ASM)))
@@ -48,6 +49,28 @@ BIN = $(OUTPUT)/os.bin
 
 LDFLAGS = -T linker.ld
 
+# ---- 用户程序 ----
+USER_CC = $(CC)
+USER_CFLAGS = -nostdlib -nostartfiles -ffreestanding -fno-builtin
+USER_CFLAGS += -Wall -g -O0
+USER_CFLAGS += -march=rv64imac -mabi=lp64 -mcmodel=medany
+
+USER_SRCS = user/start.S \
+			user/usys.S \
+			user/hello.c  \
+			user/uprintf.c
+USER_ELF  = user/hello
+USER_OBJ  = $(OUTPUT)/user/hello_bin.o
+
+$(USER_ELF): $(USER_SRCS) user/user.ld user/user.h
+	$(USER_CC) $(USER_CFLAGS) -T user/user.ld -o $@ \
+		user/start.S user/usys.S user/hello.c user/uprintf.c
+
+$(USER_OBJ): $(USER_ELF)
+	@$(MKDIR) $(dir $@)
+	$(OBJCOPY) -I binary -O elf64-littleriscv -B riscv $< $@
+
+
 QEMU   = qemu-system-riscv64
 QFLAGS = -nographic -smp 1 -machine virt -bios none -m 128M
 
@@ -56,8 +79,8 @@ GDB = gdb-multiarch
 .DEFAULT_GOAL := all
 all: $(ELF)
 
-$(ELF): $(OBJS) linker.ld
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
+$(ELF): $(OBJS) $(USER_OBJ) linker.ld
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(USER_OBJ)
 	$(OBJCOPY) -O binary $@ $(BIN)
 
 $(OUTPUT)/%.o: %.c
@@ -87,3 +110,4 @@ code: all
 .PHONY: clean
 clean:
 	$(RM) $(OUTPUT)
+	$(RM) $(USER_ELF)

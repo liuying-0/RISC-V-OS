@@ -5,7 +5,11 @@
 #define PLIC_BASE   0x0C000000UL
 #define CLINT_BASE  0x02000000UL
 
+#define PLIC_SIZE 0x03FFFFFFUL
+
 #define PAGE_SIZE 4096
+#define PGROUNDUP(addr)  (((unsigned long)(addr) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
+#define PGROUNDDOWN(addr) (((unsigned long)(addr)) & ~(PAGE_SIZE - 1))
 
 #define PHYS_MEM_START 0x80000000UL
 #define PHYS_MEM_SIZE (128 * 1024 * 1024)
@@ -15,6 +19,9 @@
 
 #define USER_BASE 0x0000000000000000UL
 #define USER_TOP 0x0000004000000000UL // 256GB
+
+#define KERN_BASE 0xFFFFFFFFC0000000UL  // 内核虚拟地址基址（Sv39 高地址）
+#define KERN_TOP  0xFFFFFFFF80000000UL  // 内核虚拟地址顶（符号扩展后 = 0x80000000）
 
 #define TRAMPOLINE (USER_TOP - PAGE_SIZE)
 #define TRAPFRAME (TRAMPOLINE - PAGE_SIZE)
