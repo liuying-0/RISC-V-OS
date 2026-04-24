@@ -8,33 +8,13 @@
 - 完整的 `Makefile` 和 `linker.ld`
 - 一个能编译出内核镜像并在 QEMU 中运行的项目骨架
 
-> **开发环境说明**：本项目在 Mac 上编辑代码，文件存储在 Ubuntu 上，编译和运行都在 Ubuntu 上完成。
-> 下面的工具安装步骤针对 Ubuntu。
 
 **实现顺序参考**：各阶段文件的创建时机和内容演进见 [实现顺序与文件规划](00-implementation-order.md)，可避免依赖顺序问题（如 `memlayout.h` 在阶段 3 即需创建初版）。
 
----
-
-## 1. 与之前 RV32 项目的差异
-
-你之前做过 RV32 的 OS 项目，这次升级到 RV64，主要变化如下：
-
-| 项目 | RV32（旧） | RV64（新） |
-|------|-----------|-----------|
-| 架构 | `rv32g` / `ilp32` | `rv64imac` / `lp64` |
-| QEMU | `qemu-system-riscv32` | `qemu-system-riscv64` |
-| 寄存器宽度 | 32 位 | 64 位 |
-| 指针大小 | 4 字节 | 8 字节 |
-| 汇编存取指令 | `lw` / `sw`（4 字节） | `ld` / `sd`（8 字节） |
-| 虚拟内存 | Sv32（2 级页表） | Sv39（3 级页表） |
-| 页表项大小 | 4 字节 | 8 字节 |
-| 类型定义 | `uint32_t` | `uint64_t`（地址/寄存器相关） |
-
-**特别注意**：在汇编中保存/恢复寄存器时，必须使用 `sd`/`ld`（8 字节），而不是之前的 `sw`/`lw`。栈帧中每个寄存器槽位占 8 字节。
 
 ---
 
-## 2. 安装工具链（Ubuntu）
+## 1. 安装工具链（Ubuntu）
 
 ```bash
 sudo apt update
@@ -63,7 +43,7 @@ gdb-multiarch --version
 
 ---
 
-## 3. 了解 QEMU virt 平台
+## 2. 了解 QEMU virt 平台
 
 QEMU 的 `virt` 机器的硬件布局：
 
@@ -78,14 +58,11 @@ QEMU 的 `virt` 机器的硬件布局：
 0x8000_0000 - ...         RAM（主内存，默认 128MB）
 ```
 
-**注意**：这个布局和你之前 RV32 virt 平台基本一致，地址没有变化。
-
 ---
 
-## 4. 完善链接脚本 `linker.ld`
+## 3. 完善链接脚本 `linker.ld`
 
-你当前的 `linker.ld` 已经有了基本结构，还需要补充一些符号导出，后续阶段会用到：
-
+ `linker.ld` 是控制内存分布的文件，需要提前进行配置
 ```linker
 OUTPUT_ARCH(riscv)
 ENTRY(_entry)
@@ -100,6 +77,8 @@ SECTIONS {
         *(.text .text.*)
         PROVIDE(_text_end = .);
     }
+
+    . = ALIGN(0x1000);
 
     .rodata : {
         PROVIDE(_rodata_start = .);
@@ -126,32 +105,21 @@ SECTIONS {
 }
 ```
 
-新增的 `PROVIDE` 符号说明：
+ `PROVIDE` 符号说明：
 - `_text_start` / `_text_end`：代码段的范围，用于设置页表时标记为只读+可执行
 - `_rodata_start` / `_rodata_end`：只读数据段范围
 - `_data_start` / `_data_end`：数据段范围，标记为可读写
 - 后续启用虚拟内存时，不同段需要不同的页权限
 
-> **进阶技巧**：你之前的项目用 `gcc -E -P` 预处理 linker script，这个技巧在新项目中同样可以用。
-> 比如用 `#define` 定义 `BASE_ADDRESS`，然后在 C 头文件和 linker script 中共享。
-> 可以暂时先不做，等需要时再加。
+
 
 ---
 
-## 5. 编写 Makefile
+## 4. 编写 Makefile
 
-你的新项目有子目录结构（`bootloader/`、`kernel/`、`user/` 等），Makefile 需要能处理多目录。基于你之前的 Makefile 风格，这里给出适配新项目的版本：
+项目有子目录结构（`bootloader/`、`kernel/`、`user/` 等），Makefile 需要能处理多目录。
 
-### 5.1 需要调整的关键点
-
-| 旧项目 | 新项目 |
-|--------|--------|
-| `-march=rv32g -mabi=ilp32` | `-march=rv64imac -mabi=lp64` |
-| `qemu-system-riscv32` | `qemu-system-riscv64` |
-| 扁平目录，手动列出源文件 | 多子目录，需要自动搜索或按目录列出 |
-| 所有代码一起编译 | 阶段性添加目录（先只编译 bootloader/） |
-
-### 5.2 Makefile 框架
+### 4.1 Makefile 框架
 
 ```makefile
 CROSS_COMPILE = riscv64-unknown-elf-
@@ -247,7 +215,7 @@ clean:
 	$(RM) $(OUTPUT)
 ```
 
-### 5.3 关键说明
+### 4.2 关键说明
 
 **`-mcmodel=medany`**：
 这是 RV64 裸机开发**必须**加的选项。你之前的 RV32 项目不需要，因为 RV32 地址空间只有 4GB。RV64 的默认代码模型 (`medlow`) 假设所有符号在低 2GB 内，但内核加载在 `0x80000000`，超出了这个范围。`medany` 允许代码在任意 2GB 窗口内。
@@ -281,7 +249,7 @@ SRCS_C += kernel/main.c \
 SRCS_ASM += kernel/trap/trap_entry.S
 ```
 
-### 5.4 头文件搜索路径
+### 4.3 头文件搜索路径
 
 当项目变大后，你会需要添加 `-I` 选项让编译器找到头文件：
 
@@ -294,23 +262,9 @@ CFLAGS += -I kernel/driver
 
 ---
 
-## 6. 创建项目目录结构
+## 5. 测试：编译并运行
 
-在 Ubuntu 上执行：
-
-```bash
-cd /path/to/os
-mkdir -p bootloader kernel/trap kernel/mm kernel/proc kernel/sync
-mkdir -p kernel/driver kernel/lib user/lib include scripts docs
-```
-
-你的 `bootloader/entry.S` 已经有了，其余文件在后续阶段中创建。
-
----
-
-## 7. 测试：编译并运行
-
-### 7.1 创建最小 main.c
+### 5.1 创建最小 main.c
 
 现在 `entry.S` 中还没有跳转到 `main`，先验证编译流程能走通。
 
@@ -323,7 +277,7 @@ void main(void) {
 
 以及空的 `kernel/driver/uart.c`（或者先从 SRCS_C 中去掉）。
 
-### 7.2 编译
+### 5.2 编译
 
 ```bash
 make
@@ -331,7 +285,7 @@ make
 
 应该能成功生成 `out/os.elf` 和 `out/os.bin`。
 
-### 7.3 运行
+### 5.3 运行
 
 ```bash
 make run
@@ -339,7 +293,7 @@ make run
 
 QEMU 应该启动但无输出（因为还没有 UART 驱动）。按 `Ctrl-A` 然后 `X` 退出。
 
-### 7.4 调试验证
+### 5.4 调试验证
 
 ```bash
 make debug
@@ -354,24 +308,6 @@ make debug
 ```
 
 确认代码确实在 `0x80000000` 处执行。
-
----
-
-## 8. 常见问题
-
-### Q: `riscv64-unknown-elf-gcc` 找不到？
-A: 检查是否安装了正确的包。Ubuntu 上也可能叫 `riscv64-linux-gnu-gcc`，相应修改 `CROSS_COMPILE`。
-
-### Q: 链接报错 `relocation truncated to fit: R_RISCV_HI20`？
-A: 没有加 `-mcmodel=medany`。RV64 必须加这个选项。
-
-### Q: QEMU 启动后直接退出？
-A: 检查 `-bios none` 是否加了，检查 ELF 的入口地址是否是 `0x80000000`。可以用 `riscv64-unknown-elf-objdump -h out/os.elf` 查看段地址。
-
-### Q: Mac 上能直接编译运行吗？
-A: 如果你在 Mac 上也安装了 RISC-V 工具链和 QEMU（通过 Homebrew），理论上可以。
-但工具链前缀可能不同（`riscv64-elf-` 而不是 `riscv64-unknown-elf-`）。
-建议保持在 Ubuntu 上编译运行，Mac 上只做编辑。
 
 ---
 
